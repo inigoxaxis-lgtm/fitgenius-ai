@@ -148,7 +148,8 @@ def get_ai_response(user_message, chat_history=None):
                 temperature=0.7,
                 top_p= 0.8,
                 top_k=40,
-                max_output_tokens=800,
+                max_output_tokens=3000,
+                #max tokens para prueba 800
                 #max tokens final 3000
             )
         )
@@ -205,10 +206,6 @@ if uploaded_file is not None:
             "content": f"📸 [Imagen subida: {uploaded_file.name}]" + (f"\nPregunta: {image_question}" if image_question else "")
         })
         
-        with st.chat_message("user"):
-            st.write(f"📸 Subí una imagen: {uploaded_file.name}")
-            if image_question:
-                st.write(f"❓ {image_question}")
         
         # Procesar imagen
         with st.chat_message("assistant"):
