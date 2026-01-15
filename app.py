@@ -33,8 +33,6 @@ st.subheader("Entrenamiento Personal Inteligente")
 # 2. Config Gemini      #
 #-----------------------#
 #Configuracion de API KEY
-api_key = os.getenv("GOOGLE_API_KEY")
-
 try:
     if "GOOGLE_API_KEY" in st.secrets:
         #Tratar de cargar key desde secrets
@@ -46,9 +44,10 @@ try:
         if api_key:
             st.sidebar.info("MODO API LOCAL")
 except:
+    #Opción prueba local
     api_key = os.getenv("GOOGLE_APY_KEY")
 
-#No API -> Error
+#No API -> Error ->
 if not api_key:
     st.error("No se encontró GOOGLE_API_KEY")
     st.info("Por favor, agregar API KEY al archivo .env")
@@ -140,12 +139,22 @@ def get_ai_response(user_message, chat_history=None):
             chat_history = []
 
         #Crear contexto
-        messages = [system_prompt] + chat_history + [user_message]
-        context = "\n".join(messages)
+        messages = []
+        messages.append({"role": "user", "parts": [f"Contexto: {system_prompt}"]})
+
+        # Agregar historial de chat
+        for msg in chat_history:
+            if "Usuario:" in msg:
+                messages.append({"role": "user", "parts": [msg.replace("Usuario: ", "")]})
+            elif "Asistente:" in msg:
+                messages.append({"role": "model", "parts": [msg.replace("Asistente: ", "")]})
+
+         # Agregar mensaje actual
+        messages.append({"role": "user", "parts": [user_message]})
 
         #Generación de respuestas
         response = model.generate_content(
-            context,
+            messages,
             generation_config=genai.types.GenerationConfig(
                 temperature=0.7,
                 top_p= 0.8,
