@@ -241,7 +241,7 @@ if user_input and user_input.strip():
     #Generar respuesta
     with st.spinner("🤔 Pensando..."):
         try:
-            assistant_response = get_text_response(
+            assistant_response = get_ai_response(
                 f"Usuario: {user_input}",
                 st.session_state.chat_history
             )
