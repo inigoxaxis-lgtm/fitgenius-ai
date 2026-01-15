@@ -10,7 +10,8 @@ from PIL import Image
 from dotenv import load_dotenv
 import hashlib
 import time
-
+import base64  
+from io import BytesIO
 #-------------------------------------------#
 # 1. CONFIG. INICIAL                        #
 #-------------------------------------------#
@@ -162,6 +163,8 @@ def get_ai_response(user_message, chat_history=None):
 def image_to_base64(image):
     """Convierte imagen a base64 para mostrarla en el chat"""
     buffered = BytesIO()
+    if image.mode in ("RGBA", "P", "LA"):
+        image = image.convert("RGB")
     image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode()
         
