@@ -10,8 +10,7 @@ from PIL import Image
 from dotenv import load_dotenv
 import hashlib
 import time
-import base64  
-from io import BytesIO
+
 #-------------------------------------------#
 # 1. CONFIG. INICIAL                        #
 #-------------------------------------------#
@@ -60,9 +59,9 @@ except Exception as e:
     st.error(f"Error al conectar a Gemini: {e}")
     st.stop()
 
-#-----------------------------------#
-# 3. PROMPT DE SISTEMA EXPERTO      #
-#-----------------------------------#
+#----------------------#
+# 3. PROMPT DE SISTEMA #
+#----------------------#
 
 system_prompt = """Eres FitGenius, un entrenador personal y nutricionista certificado con años de experiencia. Tu especialidad es crear rutinas de ejercicio efectivas, y planes dietarios óptimizados.
 
@@ -139,18 +138,8 @@ def get_ai_response(user_message, chat_history=None):
             chat_history = []
 
         #Crear contexto
-        messages = []
-        messages.append({"role": "user", "parts": [f"Contexto: {system_prompt}"]})
-
-        # Agregar historial de chat
-        for msg in chat_history:
-            if "Usuario:" in msg:
-                messages.append({"role": "user", "parts": [msg.replace("Usuario: ", "")]})
-            elif "Asistente:" in msg:
-                messages.append({"role": "model", "parts": [msg.replace("Asistente: ", "")]})
-
-         # Agregar mensaje actual
-        messages.append({"role": "user", "parts": [user_message]})
+        messages = [system_prompt] + chat_history + [user_message]
+        context = "\n".join(messages)
 
         #Generación de respuestas
         response = model.generate_content(
@@ -168,14 +157,6 @@ def get_ai_response(user_message, chat_history=None):
 
     except Exception as e:
         return f"Error al generar respuesta: {str(e)}"
-
-def image_to_base64(image):
-    """Convierte imagen a base64 para mostrarla en el chat"""
-    buffered = BytesIO()
-    if image.mode in ("RGBA", "P", "LA"):
-        image = image.convert("RGB")
-    image.save(buffered, format="JPEG")
-    return base64.b64encode(buffered.getvalue()).decode()
         
 #-------------------------------------#
 # 5. Intefaz de Usuario con Streamlit #
@@ -189,158 +170,124 @@ if "messages" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
+#----------------------------------#
+# 6. Subida de imágenes en sidebar #
+#----------------------------------#
+st.sidebar.header("📸 Analizar Imágenes")
 
-#-----------------------------------------#
-# 6. Input de Chat + Subida de imágenes #
-#-----------------------------------------#
-#Crear container para el input box
-chat_container = st.container()
+# Opción para subir imagen
+uploaded_file = st.sidebar.file_uploader(
+    "Sube una imagen de equipo o ejercicio",
+    type=['jpg', 'jpeg', 'png', 'webp'],
+    help="Toma una foto de un equipo de gimnasio o ejercicio para análisis"
+)
 
-with chat_container:
-    #Dividir en una sección textual y otra para botón de carga
-    col1, col2 = st.columns([6, 1])
-    with col1:
-        #Input de texto
-        user_input = st.chat_input(
-            "Escribe tu mensaje aquí...",
-            key="main_chat_input"
-        )
+if uploaded_file is not None:
+    # Mostrar vista previa
+    st.sidebar.image(uploaded_file, caption="Vista previa", use_column_width=True)
+    
+    # Campo para pregunta adicional sobre la imagen
+    image_question = st.sidebar.text_input(
+        "¿Qué quieres saber sobre esta imagen?",
+        placeholder="Ej: ¿Cómo uso este equipo? ¿Es para principiantes?"
+    )
+    
+    # Botón para analizar imagen
+    if st.sidebar.button("🔍 Analizar Imagen", use_container_width=True):
+        # Guardar imagen temporalmente
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            tmp_path = tmp_file.name
+        
+        # Mostrar en chat que se subió imagen
+        st.session_state.messages.append({
+            "role": "user", 
+            "content": f"📸 [Imagen subida: {uploaded_file.name}]" + (f"\nPregunta: {image_question}" if image_question else "")
+        })
+        
+        with st.chat_message("user"):
+            st.write(f"📸 Subí una imagen: {uploaded_file.name}")
+            if image_question:
+                st.write(f"❓ {image_question}")
+        
+        # Procesar imagen
+        with st.chat_message("assistant"):
+            with st.spinner("🔍 Analizando imagen..."):
+                try:
+                    # Obtener respuesta de Gemini Vision
+                    img_response = process_image_with_gemini(tmp_path, image_question)
+                    
+                    # Mostrar respuesta
+                    st.write(img_response)
+                    
+                    # Guardar en historial
+                    st.session_state.messages.append({
+                        "role": "assistant", 
+                        "content": f"**Análisis de imagen:**\n\n{img_response}"
+                    })
+                    
+                    # Limpiar archivo temporal
+                    os.unlink(tmp_path)
+                    
+                except Exception as e:
+                    st.error(f"Error al procesar imagen: {e}")
 
-    with col2:
-        #Botón para subir imágenes
-        st.markdown(
-            """
-            <style>
-            .upload-btn {
-                height: 50px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 20px;
-                cursor: pointer;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-
-        #El botón con "File uploader" en hidden
-        upload_clicked = st.button("📷", key="upload_btn", help="Subir imagen")
-
-        #Mostrar "File uploader" si se clickea al botón
-        if upload_clicked:
-            uploaded_file = st.file_uploader(
-                "",
-                type=['jpg', 'jpeg', 'png', 'webp'],
-                label_visibility="collapsed",
-                key="inline_image_uploader"
-            )
+#-------------------------------#
+# 7. Interfaz de chat principal #
+#-------------------------------#
+# Mostrar historial de chat
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        # Verificar si es una imagen
+        if isinstance(message["content"], str) and message["content"].startswith("📸"):
+            # Extraer nombre de archivo
+            lines = message["content"].split('\n')
+            st.write(lines[0])
+            if len(lines) > 1:
+                st.write(lines[1])
         else:
-            uploaded_file = None
+            st.write(message["content"])
 
-#---------------------------#
-# 8. Procesamiento de texto #
-#---------------------------#
+# Input de texto para chat
+user_input = st.chat_input("Escribe tu mensaje o pregunta aquí...")
 
-if user_input and user_input.strip():
-    #Añadir mensaje del usuario al historial
+if user_input:
+    # Mostrar mensaje del usuario
+    with st.chat_message("user"):
+        st.write(user_input)
+    
+    # Agregar al historial
     st.session_state.messages.append({"role": "user", "content": user_input})
     st.session_state.chat_history.append(f"Usuario: {user_input}")
 
     #Generar respuesta
-    with st.spinner("🤔 Pensando..."):
-        try:
-            assistant_response = get_ai_response(
-                f"Usuario: {user_input}",
-                st.session_state.chat_history
-            )
+    with st.chat_message("assistant"):
+        with st.spinner("🤔 Pensando..."):
+            try:
+                #Obtener respuesta de Gemini
+                assistant_response = get_ai_response(
+                    f"Usuario: {user_input}",
+                    st.session_state.chat_history
+                )
 
-            #Añadir respuesta al historial
-            st.session_state.messages.append({"role": "assistant", "content": assistant_response})
-            st.session_state.chat_history.append(f"Asistente: {assistant_response}")
+                #Añadir respuesta al historial
+                st.session_state.messages.append({"role": "assistant", "content": assistant_response})
+                st.session_state.chat_history.append(f"Asistente: {assistant_response}")
 
-            #Forzar rerun
+                #Forzar rerun
+                st.rerun()
 
-        except Exception as e:
-            error_msg=f"Error: {str(e)}"
-            st.session_state.messages.append({"role": "assistant", "content": error_msg})
-            st.rerun()
-
-#----------------------------#
-# 9. Procesamiento de imagen #
-#----------------------------#
-#Verificar si hay una imagen subida en el inline_image_uploader
-if 'inline_image_uploader' in st.session_state and st.session_state.inline_image_uploader is not None:
-    uploaded_file = st.session_state.inline_image_uploader
-
-    if uploaded_file is not None:
-        #Convertir imagen a b64
-        image = Image.open(uploaded_file)
-        image_base64 = f"data:image/jpeg;base64,{image_to_base64(image)}"
-
-        #Añadir imagen a historial
-        st.session_state.messages.append({
-            "role": "user",
-            "content": image_base64,
-            "type": "image"
-        })
-
-        #Crear área para pregunta sobre la imagen
-        st.info("📷 **Imagen cargada.** ¿Qué quieres preguntar sobre esta foto?")
-
-        #Input de texto para consulta de imagen
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            image_question = st.text_input(
-                "Pregunta sobre la imagen (opcional):",
-                placeholder="Ej: ¿Cómo uso este equipo correctamente?",
-                key="image_question_input"
-            )
-        with col2:
-            analyze_btn = st.button("🔍 Analizar", key="analyze_image_btn")
-
-        #Procesar imagen al presionar botón
-        if analyze_btn:
-            # Guardar imagen temporalmente
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
-                tmp_file.write(uploaded_file.getvalue())
-                tmp_path = tmp_file.name
-
-            #Procesar imagen
-            with st.spinner("🔍 Analizando imagen..."):
-                try:
-                    #Añadir pregunta SI existe
-                    if image_question:
-                        st.session_state.messages.append({
-                            "role": "user",
-                            "content": f"Pregunta sobre la imagen: {image_question}"
-                        })
-
-                    #Obtener respuesta
-                    img_response = process_image_with_gemini(tmp_path, image_question)
-
-                    #Guardar en historial
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": f"**Análisis de imagen:**\n\n{img_response}"
-                    })
-
-                    #Limpiar uploader
-                    st.session_state.inline_image_uploader = None
-
-                    #Limpiar archivo temporal
-                    os.unlink(tmp_path)
-
-                    st.rerun()
-
-                except Exception as e:
-                    st.error(f"Error al procesar imagen: {e}")
+            except Exception as e:
+                error_msg=f"Error: {str(e)}"
+                st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                st.rerun()
 
 #-------------------#
-# 10. Barra lateral #
+# 8. Barra lateral #
 #-------------------#
 
 with st.sidebar:
+    st.divider()
     st.header("⚙ Configuración")
 
     #Botón nueva conversación
@@ -352,7 +299,7 @@ with st.sidebar:
 
     st.divider()
 
-    #Estadísticasz
+    #Estadísticas
     st.subheader("Estadísticas")
     st.write(f"**Mensajes:** {len(st.session_state.messages)}")
     st.write(f"**Imágenes analizadas:** {sum(1 for msg in st.session_state.messages if isinstance(msg.get('content'), str) and msg['content'].startswith('data:image'))}")
@@ -362,12 +309,12 @@ with st.sidebar:
     #Ejemplos rápidos
     st.subheader("**Ejemplos de uso:**")
 
-    if st.button("Rutina para Principiantes", use_container_width=True):
-        st.session_state.messages.append({
-            "role": "user",
-            "content": "Quiero una rutina para ganar músculo en gimnasio, nivel principiante, 4 días por semana"
-        })
-        st.rerun()
+    st.subheader("💬 Preguntas de texto:")
+    example_texts = [
+        "Crear rutina para principiante en casa",
+        "Cómo hacer sentadillas correctamente",
+        "Rutina para ganar músculo en gimnasio (4 días)"
+    ]
 
     st.divider()
 
@@ -394,6 +341,6 @@ with st.sidebar:
 #-------------------#
 
 st.divider()
-st.caption("FitGenius AI V2.0 - Desarrollado con Google Gemini API | Proyecto de IA")
+st.caption("FitGenius AI V1.8 - Desarrollado con Google Gemini API | Proyecto de IA")
 st.caption("Aplicación desarrollada para fines de aprendizaje por AJLM, UGMA 2025.")
 
