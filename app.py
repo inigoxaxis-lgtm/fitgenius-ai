@@ -260,7 +260,6 @@ if user_input and user_input.strip():
             st.session_state.chat_history.append(f"Asistente: {assistant_response}")
 
             #Forzar rerun
-            st.rerun()
 
         except Exception as e:
             error_msg=f"Error: {str(e)}"
